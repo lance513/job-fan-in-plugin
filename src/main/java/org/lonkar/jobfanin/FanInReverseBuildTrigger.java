@@ -3,10 +3,11 @@ package org.lonkar.jobfanin;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Iterator;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.WeakHashMap;
 import java.util.logging.Level;
@@ -50,6 +51,7 @@ import jenkins.model.DependencyDeclarer;
 import jenkins.model.Jenkins;
 import jenkins.model.ParameterizedJobMixIn;
 import jenkins.security.QueueItemAuthenticatorConfiguration;
+import jenkins.triggers.ReverseBuildTrigger;
 
 /**
  * Similar to {# ReverseBuildTrigger} it triggers job on downstream, but checks
@@ -62,20 +64,17 @@ import jenkins.security.QueueItemAuthenticatorConfiguration;
 public final class FanInReverseBuildTrigger extends Trigger<Job> implements DependencyDeclarer {
 
 	private static final Logger LOGGER = Logger.getLogger(FanInReverseBuildTrigger.class.getName());
-	private static final Map<Job, Collection<FanInReverseBuildTrigger>> upstream2Trigger = new WeakHashMap<Job, Collection<FanInReverseBuildTrigger>>();
+	private static final Map<Job, Collection<FanInReverseBuildTrigger>> upstream2Trigger = new WeakHashMap<>();
 
 	private String upstreamProjects;
 	private final boolean watchUpstreamRecursively;
 	private final Result threshold;
-	private transient ArrayList<Job> upsteamProjects;
-	private transient DependencyGraph dependencyGraph;
 
 	@DataBoundConstructor
 	public FanInReverseBuildTrigger(String upstreamProjects, boolean watchUpstreamRecursively, Result threshold) {
 		this.upstreamProjects = upstreamProjects;
 		this.watchUpstreamRecursively = watchUpstreamRecursively;
 		this.threshold = threshold;
-		this.upsteamProjects = new ArrayList<Job>();
 	}
 
 	public String getUpstreamProjects() {
@@ -95,8 +94,8 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 		if (jenkins == null) {
 			return false;
 		}
-		// This checks Item.READ also on parent folders; note we are checking as
-		// the upstream auth currently:
+		// This checks Item.READ also on parent folders; note we are checking as the
+		// upstream auth currently:
 		boolean downstreamVisible = jenkins.getItemByFullName(job.getFullName()) == job;
 		Authentication originalAuth = Jenkins.getAuthentication();
 		Job upstream = upstreamBuild.getParent();
@@ -177,14 +176,15 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 	 * @return true if all the upstream projects are not building and have result
 	 *         SUCCESS or better.
 	 */
-	private boolean allUpsteamIsBuild() {
-		for (Job upstream : upsteamProjects) {
-			if (watchUpstreamRecursively) {
-				if (!thisAndUpstreamAreNotBuildingAndStable(upstream)) {
+	private static boolean allUpstreamIsBuild(FanInReverseBuildTrigger trigger) {
+		List<Job> jobsToCheck = Items.fromNameList(trigger.job.getParent(), trigger.getUpstreamProjects(), Job.class);
+		for (Job upstream : jobsToCheck) {
+			if (trigger.isWatchUpstreamRecursively()) {
+				if (!thisAndUpstreamAreNotBuildingAndStable(upstream, trigger.getThreshold(), jobsToCheck)) {
 					return false;
 				}
 			} else {
-				if (!isNotBuildingAndStable(upstream)) {
+				if (!isNotBuildingAndStable(upstream, trigger.getThreshold())) {
 					return false;
 				}
 			}
@@ -198,18 +198,17 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 	 * @param job to be checked
 	 * @return true if all stable
 	 */
-	private boolean thisAndUpstreamAreNotBuildingAndStable(Job job) {
-		if (isNotBuildingAndStable(job)) {
-			List<AbstractProject> upstreamProjects = dependencyGraph.getUpstream((AbstractProject) job);
-			/* check upstream projects are present */
-			if (!upstreamProjects.isEmpty()) {
-				for (Iterator<AbstractProject> iterator = upstreamProjects.iterator(); iterator.hasNext();) {
-					AbstractProject project = iterator.next();
-					if (thisAndUpstreamAreNotBuildingAndStable(project)) {
-						continue;/* continue chain of upstream projects */
-					} else {
-						return false;/* chain is broken */
-					}
+	private static boolean thisAndUpstreamAreNotBuildingAndStable(Job job, Result threshold,
+			Collection<Job> alreadyCheckedJobs) {
+		if (isNotBuildingAndStable(job, threshold)) {
+			Set<Job> upstreamJobs = getAllDirectUpstreamJobs(job);
+			upstreamJobs.removeAll(alreadyCheckedJobs);
+			Set<Job> newAlreadyCheckedJobs = new HashSet<>();
+			newAlreadyCheckedJobs.addAll(alreadyCheckedJobs);
+			newAlreadyCheckedJobs.addAll(upstreamJobs);
+			for (Job upstreamJob : upstreamJobs) {
+				if (!thisAndUpstreamAreNotBuildingAndStable(upstreamJob, threshold, newAlreadyCheckedJobs)) {
+					return false;
 				}
 			}
 			return true;
@@ -223,7 +222,7 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 	 * @param job to be checked
 	 * @return true of stable and not building
 	 */
-	private boolean isNotBuildingAndStable(Job job) {
+	private static boolean isNotBuildingAndStable(Job job, Result threshold) {
 		if (!job.isBuilding() && !job.isInQueue() && job.getLastBuild() != null) {
 			Result result = job.getLastBuild().getResult();
 			if (result != null && result.isBetterOrEqualTo(threshold)) {
@@ -233,21 +232,33 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 		return false;
 	}
 
+	private static Set<Job> getAllDirectUpstreamJobs(Job job) {
+		Set<Job> upstreamJobs = new HashSet<>();
+		if (job instanceof AbstractProject) {
+			upstreamJobs.addAll(Jenkins.getActiveInstance().getDependencyGraph().getUpstream((AbstractProject) job));
+		} else {
+			ReverseBuildTrigger trig1 = ParameterizedJobMixIn.getTrigger(job, ReverseBuildTrigger.class);
+			if (trig1 != null) {
+				upstreamJobs.addAll(Items.fromNameList(job.getParent(), trig1.getUpstreamProjects(), Job.class));
+			}
+			FanInReverseBuildTrigger trig2 = ParameterizedJobMixIn.getTrigger(job, FanInReverseBuildTrigger.class);
+			if (trig2 != null) {
+				upstreamJobs.addAll(Items.fromNameList(job.getParent(), trig2.getUpstreamProjects(), Job.class));
+			}
+		}
+		return upstreamJobs;
+	}
+
 	@Override
 	public void buildDependencyGraph(final AbstractProject downstream, DependencyGraph graph) {
 		for (AbstractProject upstream : Items.fromNameList(downstream.getParent(), upstreamProjects,
 				AbstractProject.class)) {
 			// TODO: description for dependency for using in dependency graph.
-			dependencyGraph = graph;
 			graph.addDependency(new FanInDependency(upstream, downstream, "") {
 				@Override
 				public boolean shouldTriggerBuild(AbstractBuild upstreamBuild, TaskListener listener,
 						List<Action> actions) {
-					upsteamProjects = new ArrayList<Job>();
-					for (Job upstream : Items.fromNameList(downstream.getParent(), upstreamProjects, Job.class)) {
-						upsteamProjects.add(upstream);
-					}
-					return shouldTrigger(upstreamBuild, listener) && allUpsteamIsBuild();
+					return shouldTrigger(upstreamBuild, listener) && allUpstreamIsBuild(FanInReverseBuildTrigger.this);
 				}
 
 			});
@@ -351,7 +362,7 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 				triggers = new ArrayList<FanInReverseBuildTrigger>(_triggers);
 			}
 			for (final FanInReverseBuildTrigger trigger : triggers) {
-				if (trigger.shouldTrigger(r, listener)) {
+				if (trigger.shouldTrigger(r, listener) && allUpstreamIsBuild(trigger)) {
 					if (!trigger.job.isBuildable()) {
 						listener.getLogger().println(
 								hudson.tasks.Messages.BuildTrigger_Disabled(ModelHyperlinkNote.encodeTo(trigger.job)));
