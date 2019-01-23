@@ -1,32 +1,5 @@
 package org.lonkar.jobfanin;
 
-import hudson.Extension;
-import hudson.Util;
-import hudson.console.ModelHyperlinkNote;
-import hudson.model.Action;
-import hudson.model.AutoCompletionCandidates;
-import hudson.model.DependencyGraph;
-import hudson.model.DependencyGraph.Dependency;
-import hudson.model.Item;
-import hudson.model.ItemGroup;
-import hudson.model.Items;
-import hudson.model.Result;
-import hudson.model.TaskListener;
-import hudson.model.AbstractBuild;
-import hudson.model.AbstractProject;
-import hudson.model.Cause;
-import hudson.model.CauseAction;
-import hudson.model.Job;
-import hudson.model.Queue;
-import hudson.model.Run;
-import hudson.model.listeners.ItemListener;
-import hudson.model.listeners.RunListener;
-import hudson.model.queue.Tasks;
-import hudson.security.ACL;
-import hudson.triggers.Trigger;
-import hudson.triggers.TriggerDescriptor;
-import hudson.util.FormValidation;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -39,11 +12,6 @@ import java.util.WeakHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import jenkins.model.DependencyDeclarer;
-import jenkins.model.Jenkins;
-import jenkins.model.ParameterizedJobMixIn;
-import jenkins.security.QueueItemAuthenticatorConfiguration;
-
 import org.acegisecurity.Authentication;
 import org.acegisecurity.context.SecurityContext;
 import org.acegisecurity.context.SecurityContextHolder;
@@ -52,10 +20,42 @@ import org.kohsuke.stapler.AncestorInPath;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
 
+import hudson.Extension;
+import hudson.Util;
+import hudson.console.ModelHyperlinkNote;
+import hudson.model.AbstractBuild;
+import hudson.model.AbstractProject;
+import hudson.model.Action;
+import hudson.model.AutoCompletionCandidates;
+import hudson.model.Cause;
+import hudson.model.CauseAction;
+import hudson.model.DependencyGraph;
+import hudson.model.DependencyGraph.Dependency;
+import hudson.model.Item;
+import hudson.model.ItemGroup;
+import hudson.model.Items;
+import hudson.model.Job;
+import hudson.model.Queue;
+import hudson.model.Result;
+import hudson.model.Run;
+import hudson.model.TaskListener;
+import hudson.model.listeners.ItemListener;
+import hudson.model.listeners.RunListener;
+import hudson.model.queue.Tasks;
+import hudson.security.ACL;
+import hudson.triggers.Trigger;
+import hudson.triggers.TriggerDescriptor;
+import hudson.util.FormValidation;
+import jenkins.model.DependencyDeclarer;
+import jenkins.model.Jenkins;
+import jenkins.model.ParameterizedJobMixIn;
+import jenkins.security.QueueItemAuthenticatorConfiguration;
+
 /**
- * Similar to {# ReverseBuildTrigger} it triggers job on downstream, but checks for all the upstream jobs are build and are stable 
- * @author lonkar.yogeshr@gmail.com
- * Mar 1, 2016
+ * Similar to {# ReverseBuildTrigger} it triggers job on downstream, but checks
+ * for all the upstream jobs are build and are stable
+ * 
+ * @author lonkar.yogeshr@gmail.com Mar 1, 2016
  *
  */
 @SuppressWarnings("rawtypes")
@@ -81,11 +81,11 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 	public String getUpstreamProjects() {
 		return upstreamProjects;
 	}
-	
+
 	public Result getThreshold() {
 		return threshold;
 	}
-	
+
 	public boolean isWatchUpstreamRecursively() {
 		return watchUpstreamRecursively;
 	}
@@ -108,11 +108,8 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 		try {
 			if (jenkins.getItemByFullName(upstream.getFullName()) != upstream) {
 				if (downstreamVisible) {
-					listener.getLogger()
-							.println(
-									"Running as "
-											+ (auth.getName() + " cannot even see " + upstream.getFullName()
-													+ " for trigger from " + job.getFullName()));
+					listener.getLogger().println("Running as " + (auth.getName() + " cannot even see "
+							+ upstream.getFullName() + " for trigger from " + job.getFullName()));
 				} else {
 					LOGGER.log(Level.WARNING,
 							"Running as {0} cannot even see {1} for trigger from {2} (but cannot tell {3} that)",
@@ -131,8 +128,7 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 
 	/**
 	 * 
-	 * @author lonkar.yogeshr@gmail.com
-	 * Mar 1, 2016
+	 * @author lonkar.yogeshr@gmail.com Mar 1, 2016
 	 *
 	 */
 	public static class FanInDependency extends DependencyGraph.Dependency {
@@ -178,7 +174,8 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 	/**
 	 * Checks if all the dependent upstream projects are not build and stable.
 	 * 
-	 * @return true if all the upstream projects are not building and have result SUCCESS or better.
+	 * @return true if all the upstream projects are not building and have result
+	 *         SUCCESS or better.
 	 */
 	private boolean allUpsteamIsBuild() {
 		for (Job upstream : upsteamProjects) {
@@ -197,6 +194,7 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 
 	/**
 	 * Checks if this job and its upstream are not building and all are stable
+	 * 
 	 * @param job to be checked
 	 * @return true if all stable
 	 */
@@ -208,9 +206,9 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 				for (Iterator<AbstractProject> iterator = upstreamProjects.iterator(); iterator.hasNext();) {
 					AbstractProject project = iterator.next();
 					if (thisAndUpstreamAreNotBuildingAndStable(project)) {
-						continue;/*continue chain of upstream projects*/
+						continue;/* continue chain of upstream projects */
 					} else {
-						return false;/*chain is broken*/
+						return false;/* chain is broken */
 					}
 				}
 			}
@@ -221,6 +219,7 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 
 	/**
 	 * Check if job is currently not building & is stable.
+	 * 
 	 * @param job to be checked
 	 * @return true of stable and not building
 	 */
@@ -236,12 +235,14 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 
 	@Override
 	public void buildDependencyGraph(final AbstractProject downstream, DependencyGraph graph) {
-		for (AbstractProject upstream : Items.fromNameList(downstream.getParent(), upstreamProjects, AbstractProject.class)) {
+		for (AbstractProject upstream : Items.fromNameList(downstream.getParent(), upstreamProjects,
+				AbstractProject.class)) {
 			// TODO: description for dependency for using in dependency graph.
 			dependencyGraph = graph;
 			graph.addDependency(new FanInDependency(upstream, downstream, "") {
 				@Override
-				public boolean shouldTriggerBuild(AbstractBuild upstreamBuild, TaskListener listener, List<Action> actions) {
+				public boolean shouldTriggerBuild(AbstractBuild upstreamBuild, TaskListener listener,
+						List<Action> actions) {
 					upsteamProjects = new ArrayList<Job>();
 					for (Job upstream : Items.fromNameList(downstream.getParent(), upstreamProjects, Job.class)) {
 						upsteamProjects.add(upstream);
@@ -322,8 +323,8 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 					if (item == null) {
 						Job nearest = Items.findNearest(Job.class, projectName, project.getParent());
 						String alternative = nearest != null ? nearest.getRelativeNameFrom(project) : "?";
-						return FormValidation.error(hudson.tasks.Messages.BuildTrigger_NoSuchProject(projectName,
-								alternative));
+						return FormValidation
+								.error(hudson.tasks.Messages.BuildTrigger_NoSuchProject(projectName, alternative));
 					}
 					hasProjects = true;
 				}
@@ -357,7 +358,8 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 						continue;
 					}
 					String name = ModelHyperlinkNote.encodeTo(trigger.job) + " #" + trigger.job.getNextBuildNumber();
-					if (ParameterizedJobMixIn.scheduleBuild2(trigger.job, -1, new CauseAction(new Cause.UpstreamCause(r))) != null) {
+					if (ParameterizedJobMixIn.scheduleBuild2(trigger.job, -1,
+							new CauseAction(new Cause.UpstreamCause(r))) != null) {
 						listener.getLogger().println(hudson.tasks.Messages.BuildTrigger_Triggering(name));
 					} else {
 						listener.getLogger().println(hudson.tasks.Messages.BuildTrigger_InQueue(name));
@@ -378,15 +380,15 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 			for (Job<?, ?> p : jenkins.getAllItems(Job.class)) {
 				FanInReverseBuildTrigger t = ParameterizedJobMixIn.getTrigger(p, FanInReverseBuildTrigger.class);
 				if (t != null) {
-					String revised = Items.computeRelativeNamesAfterRenaming(oldFullName, newFullName, t.upstreamProjects,
-							p.getParent());
+					String revised = Items.computeRelativeNamesAfterRenaming(oldFullName, newFullName,
+							t.upstreamProjects, p.getParent());
 					if (!revised.equals(t.upstreamProjects)) {
 						t.upstreamProjects = revised;
 						try {
 							p.save();
 						} catch (IOException e) {
-							LOGGER.log(Level.WARNING, "Failed to persist project setting during rename from " + oldFullName
-									+ " to " + newFullName, e);
+							LOGGER.log(Level.WARNING, "Failed to persist project setting during rename from "
+									+ oldFullName + " to " + newFullName, e);
 						}
 					}
 				}
