@@ -44,6 +44,7 @@ import hudson.model.listeners.ItemListener;
 import hudson.model.listeners.RunListener;
 import hudson.model.queue.Tasks;
 import hudson.security.ACL;
+import hudson.tasks.BuildTrigger;
 import hudson.triggers.Trigger;
 import hudson.triggers.TriggerDescriptor;
 import hudson.util.FormValidation;
@@ -54,8 +55,8 @@ import jenkins.security.QueueItemAuthenticatorConfiguration;
 import jenkins.triggers.ReverseBuildTrigger;
 
 /**
- * Similar to {# ReverseBuildTrigger} it triggers job on downstream, but checks
- * for all the upstream jobs are build and are stable
+ * Similar to {# ReverseBuildTrigger} it triggers job on downstream, but checks for all the upstream jobs are build and
+ * are stable
  * 
  * @author lonkar.yogeshr@gmail.com Mar 1, 2016
  *
@@ -173,8 +174,7 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 	/**
 	 * Checks if all the dependent upstream projects are not build and stable.
 	 * 
-	 * @return true if all the upstream projects are not building and have result
-	 *         SUCCESS or better.
+	 * @return true if all the upstream projects are not building and have result SUCCESS or better.
 	 */
 	private static boolean allUpstreamIsBuild(FanInReverseBuildTrigger trigger) {
 		List<Job> jobsToCheck = Items.fromNameList(trigger.job.getParent(), trigger.getUpstreamProjects(), Job.class);
@@ -234,18 +234,30 @@ public final class FanInReverseBuildTrigger extends Trigger<Job> implements Depe
 
 	private static Set<Job> getAllDirectUpstreamJobs(Job job) {
 		Set<Job> upstreamJobs = new HashSet<>();
+		// get upstream jobs from DependencyGraph
 		if (job instanceof AbstractProject) {
 			upstreamJobs.addAll(Jenkins.getActiveInstance().getDependencyGraph().getUpstream((AbstractProject) job));
-		} else {
-			ReverseBuildTrigger trig1 = ParameterizedJobMixIn.getTrigger(job, ReverseBuildTrigger.class);
-			if (trig1 != null) {
-				upstreamJobs.addAll(Items.fromNameList(job.getParent(), trig1.getUpstreamProjects(), Job.class));
-			}
-			FanInReverseBuildTrigger trig2 = ParameterizedJobMixIn.getTrigger(job, FanInReverseBuildTrigger.class);
-			if (trig2 != null) {
-				upstreamJobs.addAll(Items.fromNameList(job.getParent(), trig2.getUpstreamProjects(), Job.class));
+		}
+		// get upstream jobs from ReverseBuildTrigger
+		ReverseBuildTrigger trig1 = ParameterizedJobMixIn.getTrigger(job, ReverseBuildTrigger.class);
+		if (trig1 != null) {
+			upstreamJobs.addAll(Items.fromNameList(job.getParent(), trig1.getUpstreamProjects(), Job.class));
+		}
+		// get upstream jobs from FanInReverseBuildTrigger
+		FanInReverseBuildTrigger trig2 = ParameterizedJobMixIn.getTrigger(job, FanInReverseBuildTrigger.class);
+		if (trig2 != null) {
+			upstreamJobs.addAll(Items.fromNameList(job.getParent(), trig2.getUpstreamProjects(), Job.class));
+		}
+		// get upstream jobs from BuildTrigger which is a Publisher configured on upstream job
+		for (AbstractProject<?, ?> upstream : Jenkins.getActiveInstance().getAllItems(AbstractProject.class)) {
+			BuildTrigger buildTrigger = upstream.getPublishersList().get(BuildTrigger.class);
+			if (buildTrigger != null
+					&& Items.fromNameList(upstream.getParent(), buildTrigger.getChildProjectsValue(), Job.class)
+							.contains(job)) {
+				upstreamJobs.add(upstream);
 			}
 		}
+
 		return upstreamJobs;
 	}
 
